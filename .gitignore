@@ -1,0 +1,5 @@
+.env
+.memory_gate/
+*.log
+.DS_Store
+__pycache__/
