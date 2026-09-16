@@ -10,6 +10,10 @@ I've been running this for a few months across dozens of long-running projects. 
 time I checked: **2.5M characters stored, and only 0.8% of that gets read into context
 automatically per session.** That's not a bug — it's the entire design.
 
+**Re-measured six weeks later: 6.44M characters across 921 files, and the auto-loaded index is
+now 0.26%.** The store grew 2.6x while the always-on context cost went down by a factor of three.
+The section on what changed is near the bottom, including the one ratio that got worse.
+
 ## The problem this solves
 
 Claude Code sessions have a limited context window. A memory store doesn't. If you try to make
@@ -23,9 +27,9 @@ look instead of what to memorize.
 ## Architecture: three layers
 
 ```
-Layer 1 — Index (always loaded)         ~0.8% of total volume, 100% load frequency
-Layer 2 — Triggers & rules (on demand)   ~6% of total volume, loaded when grepped
-Layer 3 — Source of truth (on demand)    ~93% of total volume, loaded when opened
+Layer 1 — Index (always loaded)          0.26% of total volume, 100% load frequency
+Layer 2 — Triggers & rules (on demand)    13% of total volume, loaded when grepped
+Layer 3 — Source of truth (on demand)     87% of total volume, loaded when opened
 ```
 
 **Layer 1 — `MEMORY.md`.** One line per memory: "file exists + one-line hook." It doesn't store
@@ -82,6 +86,40 @@ source-of-truth file > trigger-table projection > index hook line > old log snap
 conflicts resolve by newer date. If it can't be resolved that way, the system asks rather than
 guessing.
 
+## What changed in six weeks
+
+The three layers held. What I added after the first commit:
+
+**An archive tier** (`_archive_index.md`). Finished projects and cold lines don't get deleted,
+they get demoted: the index line moves to a separate file while the source file stays where it
+is. Deleting would lose the "we already tried this" answer, which is the one I reach for most.
+
+**A partitioned index.** The index hit its own ceiling. One project had grown to 66 index lines,
+two thirds of the file, for work I only touch on some days. Those moved out to
+`_matrix_index.md` and the main index kept a single line pointing at it.
+
+**Project-based filing instead of event-based.** The index started as a running log: one line
+per incident, appended forever. Refiling by project (one archive file per project, with new
+incidents appended inside it rather than to the index) took the index from 24,349 to 20,760
+characters without dropping anything.
+
+**Measure in characters, not bytes.** `wc -c` misdiagnosed the index size three times before I
+caught it. CJK text is 3 bytes per character, so a byte count reads three times too high. Every
+threshold in the size gate now uses `len(open(path, encoding='utf-8').read())`.
+
+### What broke
+
+Layer 2 did not hold its ratio. The trigger table is now 13% of total volume, up from the ~6%
+quoted above. That is 849,747 characters in one file.
+
+The flow gate slowed the growth without stopping it. It catches a line that is too long or a
+duplicate pointer. It does not catch a line that earns its place and then keeps earning more of
+it every month. The gate that would fix this — retiring trigger words nobody types anymore —
+doesn't exist yet, because I have no data on which ones actually get hit.
+
+The grep-first discipline still works at this size, so this is a cost problem rather than a
+correctness one.
+
 ## Setup
 
 1. Copy `hooks/memory_backup.sh` and `hooks/memory_size_gate.py` into `~/.claude/hooks/`, and
@@ -118,8 +156,8 @@ guessing.
 
 Fully fictional example files (a fake "widget launch" project) showing the expected format —
 `MEMORY.md` index entries, a trigger-table excerpt, and one source-of-truth topic file. Nothing
-in this repository is a real project, client, or account; the numbers in this README (2.5M
-characters, 0.8%, three layers) come from my own real usage but the file contents you can browse
+in this repository is a real project, client, or account; the numbers in this README (6.44M
+characters, 0.26%, three layers) come from my own real usage but the file contents you can browse
 are all placeholders.
 
 ## License
