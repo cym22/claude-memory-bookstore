@@ -28,6 +28,7 @@
 
 ────────────────────────────────────────────────────────────
 Gate v2(新增)= **流量闸**,回执给写入方的那个 Claude 会话。
+Gate v3(后加)= 链接总数闸 + logs 保质期,在净增事件指针时点名该退役的最老几条。
 
 起因(一次增量成分分解):复胖引擎是**每天新增 8-10 条 × 均 260 字符
 的新行**,不是旧行变胖(比例 4~7:1)。⟹ 只砍存量(瘦身/降层)永远是一次性的,
@@ -72,6 +73,44 @@ HOOK_CHARS = 120             # 「一句钩子」纪律线,只用于回执文案
 EXEMPT_MARK = "\U0001F534\U0001F534\U0001F534"   # 🔴🔴🔴 宪法级红线行豁免(必须每会话在场)
 FEEDBACK_FILE = os.path.join(STATE, "feedback.json")
 LINK_RE = re.compile(r"\]\(([^)]+\.md)\)")
+
+# ---- Gate v3:链接总数闸 + logs 保质期 ----
+# 病灶(实测):索引里约 38% 的链接是 `logs/` 事件记账,只进不出。
+#   先立的「写入前自数链接,超线就同步降层」是**软约束**,五天内净增 25 条、零次触发,
+#   已实测击穿。⟹ 改成由闸现算并**点名该退役的哪条**,把「要自己想」降成「照着删」。
+#   仍不阻断写入(拒绝写记忆 = 信息永久丢失,代价不对等)。
+LINK_WARN = 230              # 链接总数警戒线(约 98 字符/链接 ⟹ 24,400 硬顶 ≈ 249 条)
+LOGS_PER_TRACK = 3           # 同一战线在索引里最多留几条 logs/ 指针,超出的最老者进退役候选
+LOG_PATH_RE = re.compile(r"^logs/(\d{4}-\d{2}-\d{2})_(.+)\.md$")
+
+
+def _stale_log_candidates(rows):
+    """按「战线」给 logs/ 指针分组,返回超保质期的最老几条。
+
+    战线 key = 文件名日期后的第一个 token(handoff_/plan_ 前缀则取第二个)。
+    实测:92 条 logs 分 42 组,其中 36 组只有 1-2 条(健康,不该动),
+    超标全集中在头部少数几组 ⟹ 该启发式够用。
+    🔑 产物是**候选不是结论**——最肥那组里可能有当天刚上线的活线,必须交人拍板。
+    """
+    groups = {}
+    for row in rows:
+        for path in LINK_RE.findall(row):
+            m = LOG_PATH_RE.match(path)
+            if not m:
+                continue
+            slug = m.group(2)
+            tok = slug.split("_")[0]
+            if tok in ("handoff", "plan") and "_" in slug:
+                tok = slug.split("_")[1]
+            groups.setdefault(tok, []).append((m.group(1), path))
+    out = []
+    for _tok, items in groups.items():
+        if len(items) <= LOGS_PER_TRACK:
+            continue
+        items.sort()                       # 按日期,最老在前
+        out.extend(p for _d, p in items[:len(items) - LOGS_PER_TRACK])
+    out.sort()
+    return out
 
 # ---- 流量闸的两条熔断 ----
 # 🔴 病灶:`memory_backup.sh` 的 _autogit **只在 rsync 成功分支里执行** ⟹ 备份盘一掉
@@ -193,6 +232,22 @@ def writer_feedback():
         notes.append("• 本次净增 %d 条 logs/decisions 事件指针。"
                      "\n  → 同一战线的旧交接/拍板行应**就地替换或降层**,不要净增"
                      "(举例:两条长期跟踪的战线各自已占 20+ 行,合计吃掉索引近一半)。" % net)
+
+    # ⓓ 链接总数闸 + logs 保质期(Gate v3)
+    #    只在「净增事件指针」时判——瘦身/纯改写不该被这条骚扰。
+    total_links = len({p for r in full_rows for p in LINK_RE.findall(r)})
+    if net > 0 and total_links > LINK_WARN:
+        tip = ("• 🔴 **索引已有 %d 条链接(警戒线 %d),本次还净增 %d 条事件指针**"
+               "\n  → 必须**同步降层至少 %d 条**,否则下次瘦身只能砍在跑的线"
+               "(实测:索引约 38%% 是 logs 事件记账,只进不出)。"
+               "\n  → 降层≠删除:迁进 `_archive_index.md`,验收判「消失的 ⊆ 落档的」。"
+               % (total_links, LINK_WARN, net, net))
+        cand = _stale_log_candidates(full_rows)
+        if cand:
+            tip += ("\n  → 现成候选(同战线 logs 已超 %d 条,列最老 5 条,**是候选不是结论,"
+                    "开真源核过再降**):\n     %s"
+                    % (LOGS_PER_TRACK, "\n     ".join(cand[:5])))
+        notes.append(tip)
 
     if not notes:
         return None

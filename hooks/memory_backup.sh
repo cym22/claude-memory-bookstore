@@ -42,7 +42,7 @@ _autogit() {  # $1=工作区 $2=remote名(可多个,空格分隔) $3=commit消�
 #      故一切中文一律关在带引号的 python heredoc / 独立 python 脚本里,bash 侧只搬运变量。
 _tg() {  # $1=消息正文;先代理后直连,双失败静默(闸是提醒不是保命层)
   . "$TG_ENV" 2>/dev/null
-  curl -sf -x 127.0.0.1:7890 --max-time 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+  curl -sf ${TG_PROXY:+-x "$TG_PROXY"} --max-time 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
     -d chat_id="${TG_CHAT_ID}" -d text="$1" >/dev/null 2>&1 \
   || curl -sf --max-time 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
     -d chat_id="${TG_CHAT_ID}" -d text="$1" >/dev/null 2>&1 \
@@ -92,7 +92,7 @@ case "$f" in
       # shellcheck source=/dev/null
       . "$TG_ENV" 2>/dev/null
       MSG="🚨 记忆库备份失败：备份盘未挂载或 rsync 报错。新记忆当前只有主盘单份！挂载恢复后下一次写记忆会自动补全量备份。(本告警去抖：恢复前只发这一条)"
-      curl -sf -x 127.0.0.1:7890 --max-time 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+      curl -sf ${TG_PROXY:+-x "$TG_PROXY"} --max-time 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
         -d chat_id="${TG_CHAT_ID}" -d text="$MSG" >/dev/null 2>&1 \
       || curl -sf --max-time 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
         -d chat_id="${TG_CHAT_ID}" -d text="$MSG" >/dev/null 2>&1 \
