@@ -107,18 +107,22 @@ characters without dropping anything.
 caught it. CJK text is 3 bytes per character, so a byte count reads three times too high. Every
 threshold in the size gate now uses `len(open(path, encoding='utf-8').read())`.
 
-### What broke
+### What layer 2 costs
 
-Layer 2 did not hold its ratio. The trigger table is now 13% of total volume, up from the ~6%
-quoted above. That is 849,747 characters in one file.
+Layer 2 didn't hold its ratio. The trigger table is now 13% of total volume, up from the ~6%
+quoted above, at 849,747 characters in one file.
 
-The flow gate slowed the growth without stopping it. It catches a line that is too long or a
-duplicate pointer. It does not catch a line that earns its place and then keeps earning more of
-it every month. The gate that would fix this — retiring trigger words nobody types anymore —
-doesn't exist yet, because I have no data on which ones actually get hit.
+Close to half of that is retired on purpose: 400,240 characters (47%) sit under an
+"archive / settled" heading, holding projects that finished, got dropped, or were superseded.
+Their trigger words stay indexed. Retiring a trigger here means demoting it to a bookmark
+instead of deleting it, because months later you still type the old codename, and that is when
+you need the system to answer "that one's finished, look at X now."
 
-The grep-first discipline still works at this size, so this is a cost problem rather than a
-correctness one.
+So the growth is a known cost of that choice. What the flow gate still misses is the other half:
+a line that earns its place and then keeps earning more of it every month. I have no hit data on
+trigger words, so I can't separate a line that's load-bearing from one that's merely old.
+
+The grep-first discipline still works at this size.
 
 ## Setup
 
